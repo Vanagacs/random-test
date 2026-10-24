@@ -1,0 +1,19 @@
+docker compose exec web php -r '
+$h="ldapc.comp.net"; $p=636;
+echo "== 1. Installed CA files (must parse as PEM):\n";
+foreach (glob("/usr/local/share/ca-certificates/*") as $f) {
+  $x=@openssl_x509_parse(file_get_contents($f));
+  echo "  ".basename($f).": ".($x ? "OK  CN=".$x["subject"]["CN"]." key=".openssl_pkey_get_details(openssl_pkey_get_public(file_get_contents($f)))["bits"]."bit" : "NOT PEM - ignored by update-ca-certificates")."\n";
+}
+echo "== 2. Chain the server sends:\n";
+$ctx=stream_context_create(["ssl"=>["verify_peer"=>false,"verify_peer_name"=>false,"capture_peer_cert_chain"=>true]]);
+$c=stream_socket_client("ssl://$h:$p",$e,$s,5,STREAM_CLIENT_CONNECT,$ctx);
+foreach (stream_context_get_params($c)["options"]["ssl"]["peer_certificate_chain"] as $i=>$x) {
+  $d=openssl_x509_parse($x); $k=openssl_pkey_get_details(openssl_pkey_get_public($x));
+  echo "  [$i] CN=".$d["subject"]["CN"]." | issuer=".$d["issuer"]["CN"]." | sig=".$d["signatureTypeSN"]." | key=".$k["bits"]."bit | names=".($d["extensions"]["subjectAltName"]??"-")."\n";
+}
+echo "== 3. Verify with name check off:\n";
+$ctx=stream_context_create(["ssl"=>["verify_peer"=>true,"verify_peer_name"=>false]]);
+echo @stream_socket_client("ssl://$h:$p",$e,$s,5,STREAM_CLIENT_CONNECT,$ctx) ? "  OK -> the problem is the NAME\n" : "  fails -> chain/CA problem\n";
+while ($m=openssl_error_string()) echo "  openssl: $m\n";
+'
